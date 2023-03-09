@@ -1,0 +1,5 @@
+^renv$
+^renv\.lock$
+^GenoClustR\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
