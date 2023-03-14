@@ -25,36 +25,61 @@ gene_corr <- function(data, gene_names=NULL) {
 }
 
 
+triangle_size <- function(i, j) {
+  offset <- abs(i - j)
+  off_diagonal <- offset * (offset - 1)
+  upper <- off_diagonal / 2
+  return(upper)
+}
+
+
+sum_child_nodes <- function(sums, i, j) {
+
+  # Making this access indices by table would be very slightly faster.
+  # [c1, target]
+  # [c3 , c2]
+  c1 <- sums[i, j - 1]
+  c2 <- sums[i + 1, j]
+
+  # We need to subtract c3 to avoid double counting it.
+  c3 <- sums[i + 1, j - 1]
+  if (is.na(c3) || is.null(c3)) {
+    c3 <-  0
+  }
+  return(c1 + c2 - c3)
+}
+
+
 #' Generate local average matrix (suffix 'A') function
 #' @export
 average_corr <- function(data) {
 
-  rmatMyDataA <- SumMatrix <- CountMatrix <- matrix(
+  averages <- sums <- matrix(
     nrow = nrow(data),
     ncol = nrow(data)
   )
 
-  diag(rmatMyData) <- NA
+  diag(data) <- NA
 
-  for (i in 1:nrow(rmatMyDataA)) {
-    for (j in 1:nrow(rmatMyDataA)) {
-      if (i >= j) {
-        next
+  for (k in seq_len(nrow(data) -  1)) {
+    k <- k - 1
+
+    for (i in seq_len(nrow(data) - k - 1)) {
+      j <- i + 1 + k
+
+      this_corr <- data[i, j]
+      # On the first diagonal, we just want the raw values.
+      if (k == 0) {
+        this_sum <- this_corr
+      } else {
+        this_sum <- sum_child_nodes(sums, i, j) + this_corr
       }
-      TempMatrix <- rmatMyData[min(i, j):max(i, j), min(i, j):max(i, j)]
-      CountMatrix[i, j] <- sum(!is.na(TempMatrix))
-      SumMatrix[i, j] <- sum(TempMatrix, na.rm = TRUE)
-      rmatMyDataA[i, j] <- SumMatrix[i, j] / CountMatrix[i, j]
+
+      sums[i, j] <- this_sum
+      averages[i, j] <- this_sum / triangle_size(i, j)
     }
   }
-  rmatMyDataA[lower.tri(rmatMyDataA)] <- NA # Keeping only upper triangle
-
-  # erase self correlations
-  for (i in 1:nrow(rmatMyDataA)) {
-    rmatMyDataA[i, i] <- NA
-  }
-
-  return(rmatMyDataA)
+  return(averages)
 }
 
 

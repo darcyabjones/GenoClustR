@@ -38,7 +38,7 @@ mypalette <- colorRampPalette(c("darkblue", "blue", "cornflowerblue", "lightblue
 
 ```{r}
 # Load your input file containing expression data under the name "MyData"
-sclero_test <- sclero[1:100,]
+sclero_test <- sclero[1:5,]
 #save(sclero_test, file = "../tests/testthat/data/sclero_test.rda")
 # Load your input file containing ordered list of genes on contig
 MyGeneNames <- rownames(sclero_test)
@@ -53,8 +53,8 @@ AnalysisName <- "MyAnalysis"
 ```
 
 ```{r}
-sclero_test_corr <- RawCorMat(sclero_test, MyGeneNames)
-sclero_test_ave_corr <- AveCorMat(sclero_test_corr)
+sclero_test_corr <- gene_corr(sclero_test, MyGeneNames)
+sclero_test_ave_corr <- average_corr(sclero_test_corr)
 sclero_test_corr
 
 sclero_test_ave_corr
@@ -80,4 +80,19 @@ results <- RunClusterDetection(
   Gap.penalty = 1,
   Report.type = "verbose"
 )
+```
+
+```{r}
+#sclero_test_corr <- sclero_test_corr[1:4,1:4]
+```
+
+
+```{r}
+for (k in seq_len(nrow(sclero_test_corr) -  1)) {
+  k <- k - 1
+  for (i in seq_len(nrow(sclero_test_corr) - k - 1)) {
+    j <- i + 1 + k
+    print(paste(i, j))
+  }
+}
 ```
