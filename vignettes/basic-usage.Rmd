@@ -1,0 +1,83 @@
+---
+title: "basic-usage"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{basic-usage}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library('GenoClustR')
+library('rlang')
+library('ggplot2')
+library("Hmisc")
+library('gplots')
+```
+
+```{r}
+data("sclero")
+```
+
+```{r}
+sclero[1:5, 1:5]
+```
+
+```{r}
+# Define your favorite color palette:
+mypalette <- colorRampPalette(c("darkblue", "blue", "cornflowerblue", "lightblue", "white", "white", "goldenrod1", "orangered", "darkred"), space="rgb")
+```
+
+
+```{r}
+# Load your input file containing expression data under the name "MyData"
+sclero_test <- sclero[1:100,]
+#save(sclero_test, file = "../tests/testthat/data/sclero_test.rda")
+# Load your input file containing ordered list of genes on contig
+MyGeneNames <- rownames(sclero_test)
+
+
+
+# Name your analysis by typing in:
+AnalysisName <- "MyAnalysis"
+
+#save(sclero_test_corr, file = "../tests/testthat/data/sclero_test_corr.rda")
+#save(sclero_test_ave_corr, file = "../tests/testthat/data/sclero_test_ave_corr.rda")
+```
+
+```{r}
+sclero_test_corr <- RawCorMat(sclero_test, MyGeneNames)
+sclero_test_ave_corr <- AveCorMat(sclero_test_corr)
+sclero_test_corr
+
+sclero_test_ave_corr
+```
+
+```{r}
+matrix(data=as.vector(ave_corr), nrow=10, ncol=10)
+```
+
+
+
+```{r}
+# Run the master function by typing in:
+results <- RunClusterDetection(
+  MyData,
+  MyGeneNames,
+  AnalysisName,
+  UseQuantile = FALSE,
+  MyCut = 0.5,
+  Edge.Fill.rate = 0.3,
+  Surface.Fill.rate = 0.1,
+  Min.Clus.size = 4,
+  Gap.penalty = 1,
+  Report.type = "verbose"
+)
+```

@@ -1,124 +1,44 @@
-###########################################################################
-# This file contains a series of R functions for analyzing co-varying
-# gene clusters in genomes.
-#
-# Copyright (c) 2021 Sylvain Raffaele
-#
-# This is free software; you can redistribute it and/or
-# modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
-# of the License, or (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# Sylvain Raffaele
-# sylvain.raffaele@inrae.fr
-# Laboratoire des Interactions Plantes-Microbes-Environnement
-# 31326 Castanet Tolosan, France
-#
-# version 0.2.29 (Jul 2021)
-###########################################################################
+#' Generate correlation matrix
+#' @export
+gene_corr <- function(data, gene_names=NULL) {
 
-###########################################################################
-# USAGE
-#
-# Load required libraries:
-# library('rlang')
-# library('ggplot2')
-# library("Hmisc")
-# library('gplots')
-#
-# Define your favorite color palette:
-# mypalette<-colorRampPalette(c("darkblue", "blue", "cornflowerblue", "lightblue", "white", "white", "goldenrod1", "orangered", "darkred"), space="rgb")
-#
-# If needed, set working directory containing your input files
-# setwd("C:/MyWorkingDir/R")
-#
-# Load this set of functions by typing in:
-# >source("GenomeClusters.R")
-#
-# Load your input file containing expression data under the name "MyData"
-# MyData<-read.table("MyDataFile.tab", sep="\t", header=F)
-#
-# Load your input file containing ordered list of genes on contig
-# MyGeneNames<-scan("MyData_Genelist.txt", what="", sep="\n")
-#
-# Name your analysis by typing in:
-# AnalysisName<-"MyAnalysis"
-#
-# Run the master function by typing in:
-# >RunClusterDetection(MyData, AnalysisName, MyCut=xx, Edge.Fill.rate=xx, Surface.Fill.rate=xx, Min.Clus.size=x, Gap.penalty=x, verbose=x)
-#
-# DESCRIPTION OF PARAMETERS
-#
-# MyData passes on the dataset loaded from input file
-#
-# AnalysisName passes on the name defined by previous instruction
-#
-# Edge.Fill.rate defines the % of matrix cells in the horizontal and
-# vertical edges of cluster triangles that need to be above the correlation
-# threshold. Numeric between 0 (any number of cells) and 1 (all cells). Self
-# correlations are taken into account.
-#
-# Surface.Fill.rate defines the % of the cells of the cluster triangle
-# that must be above the correlation threshold. Numeric between 0
-# (any number of cells) and 1 (all cells). Self correlations are ignored.
-#
-# Min.Clus.size defines the minimal size above which clusters are detected.
-# This parameter is used both on first and second pass detection, meaning
-# that the final list of clusters does not necessarily reflect how they
-# were initially detected. As a result you might find clusters of size eg 20
-# with a small Min.Clus.size value, while no cluster will be detected if
-# Min.Clus.size is set to 20.
-#
-# Gap.penalty is used to set the % of matrix cells in the diagonal edge of
-# cluster triangles (not counting self-correlations) that need to be above
-# the correlation threshold. 1 is neutral, numeric between 0 and 1 will relax
-# threshold, numeric above 1 will increase stringency.
-#
-# verbose: whether of not to print additional information in the txt report
-# and save intermediate matrices, usually for debugging. Either TRUE or FALSE
-#
-###########################################################################
+  if (is.null(gene_names)) {
+    gene_names <- rownames(data)
+  }
 
-###########################################################################
-# Generate pairwise correlation matrix function :
-###########################################################################
+  mat <- data.matrix(data)
+  mat <- Hmisc::rcorr(as.matrix(t(mat)))
 
-RawCorMat <- function (MyData, MyGeneNames) {
+  # store raw correlation coefficient matrix
+  mat <- mat$r
+  # Keeping only upper triangle
+  # NB, this still keeps the memory allocated
+  # Need to look at array based sparse matrix.
+  # Scipy dist object-like
+  mat[lower.tri(mat)] <- NA
 
-  mat.MyData <- data.matrix(MyData)
-  MycorMyData <- rcorr(as.matrix(t(mat.MyData)))
-  rmatMyData <- MycorMyData$r # store raw correlation coefficient matrix
-  rmatMyData[lower.tri(rmatMyData)] <- NA # Keeping only upper triangle
+  # Load Gene name Data
+  rownames(mat) <- gene_names
+  colnames(mat) <- gene_names
 
-  rownames(rmatMyData) <- MyGeneNames # Load Gene name Data
-  colnames(rmatMyData) <- MyGeneNames
-
-  return(rmatMyData)
+  return(mat)
 }
 
-###########################################################################
-# Generate local average matrix (suffix 'A') function:
-###########################################################################
 
-AveCorMat <- function (rmatMyData) {
+#' Generate local average matrix (suffix 'A') function
+#' @export
+average_corr <- function(data) {
 
   rmatMyDataA <- SumMatrix <- CountMatrix <- matrix(
-    nrow=nrow(rmatMyData),
-    ncol=nrow(rmatMyData)
+    nrow = nrow(data),
+    ncol = nrow(data)
   )
 
-  for (i in 1:nrow(rmatMyData)) {
-    rmatMyData[i, i] <- NA
-  }
+  diag(rmatMyData) <- NA
 
   for (i in 1:nrow(rmatMyDataA)) {
     for (j in 1:nrow(rmatMyDataA)) {
-      if (i>=j) {
+      if (i >= j) {
         next
       }
       TempMatrix <- rmatMyData[min(i, j):max(i, j), min(i, j):max(i, j)]
@@ -137,12 +57,11 @@ AveCorMat <- function (rmatMyData) {
   return(rmatMyDataA)
 }
 
-###########################################################################
-# Cluster detection (1) - cluster edges and gaps function:
-###########################################################################
 
-# takes rmatMyDatafilt matrix and i and j coordinates as input
-CalculateEdgesAndGaps <- function (rmatMyDatafilt, i, j) {
+#' Cluster detection (1) - cluster edges and gaps function
+#' takes rmatMyDatafilt matrix and i and j coordinates as input
+#' @export
+CalculateEdgesAndGaps <- function(rmatMyDatafilt, i, j) {
 
   e <- 1
   MySize <- sqrt(length(rmatMyDatafilt))
@@ -167,10 +86,9 @@ CalculateEdgesAndGaps <- function (rmatMyDatafilt, i, j) {
   return(EdgesAndGaps)
 }
 
-###########################################################################
-# Cluster detection (2) - cluster surface check function:
-###########################################################################
 
+#' Cluster detection (2) - cluster surface check function:
+#' @export
 CalculateSurfaceSum <- function(rmatMyDatafilt, i, j) {
 
   #checking number of cells in triangle above threshold
@@ -186,10 +104,8 @@ CalculateSurfaceSum <- function(rmatMyDatafilt, i, j) {
 }
 
 
-###########################################################################
-# Cluster detection (3) - cell skiping function:
-###########################################################################
-
+#' Cluster detection (3) - cell skiping function:
+#' @export
 SkipMatrixCell <- function(
   corr.threshold,
   rmatMyDatafilt,
@@ -246,10 +162,8 @@ SkipMatrixCell <- function(
 }
 
 
-###########################################################################
-# Cluster detection (4) - initial cluster rendering function:
-###########################################################################
-
+#' Cluster detection (4) - initial cluster rendering function
+#' @export
 GenerateClusterMatrix <- function(rmatMyDataClus, ikeep, jkeep) {
 
   MySize <- sqrt(length(rmatMyDataClus))
@@ -267,10 +181,8 @@ GenerateClusterMatrix <- function(rmatMyDataClus, ikeep, jkeep) {
 }
 
 
-###########################################################################
-# Cluster detection (5) - initial cluster detection function:
-###########################################################################
-
+#' Cluster detection (5) - initial cluster detection function
+#' @export
 FirstPassClusters <- function(
   rmatMyDatafilt,
   rmatMyDataClus,
@@ -327,7 +239,7 @@ FirstPassClusters <- function(
 
         # [*2] Edges and gaps checking
         if (
-        (EdgesAndGaps[1] > (Edge.Fill.rate * (MySize - i - j))) &
+        (EdgesAndGaps[1] > (Edge.Fill.rate * (MySize - i - j))) &&
         (EdgesAndGaps[2] < (Gap.penalty * (1 - Edge.Fill.rate) * (MySize - i - j)))
         ) {
           surfacesum <- CalculateSurfaceSum(rmatMyDatafilt, i, j)
@@ -385,10 +297,8 @@ FirstPassClusters <- function(
 }
 
 
-###########################################################################
-# Cluster detection (6) - join clusters & clean up function:
-###########################################################################
-
+#' Cluster detection (6) - join clusters & clean up function
+#' @export
 JoinClusters <- function(rmatMyDataClus, rmatMyDataA, corr.threshold) {
   MySize <- sqrt(length(rmatMyDataA))
   rmatMyDataClus <- apply(t(rmatMyDataClus), 2, rev) # rotate 90? counter-clockwise [note: switch the order of t() and apply()]
@@ -451,10 +361,9 @@ JoinClusters <- function(rmatMyDataClus, rmatMyDataA, corr.threshold) {
   return(rmatMyDataClus)
 }
 
-###########################################################################
-# Cluster detection (7) - finalize cluster rendering function:
-###########################################################################
 
+#' Cluster detection (7) - finalize cluster rendering function
+#' @export
 FinalizeClusterMatrix <- function(rmatMyDataClus, start_i, end_i) {
   # MySize <- nrow(rmatMyDataClus)
   for (e in start_i:end_i) { #Generates cluster matrix (rmatMyDataClus); scan columns
@@ -465,11 +374,10 @@ FinalizeClusterMatrix <- function(rmatMyDataClus, start_i, end_i) {
   return(rmatMyDataClus)
 }
 
-###########################################################################
-# Cluster detection (8) - Clean up and scan final clusters function:
-###########################################################################
 
-SecondPassClusters<-function(rmatMyDataClus, rmatMyData, report_name, Min.Clus.size, Report.type) {
+#' Cluster detection (8) - Clean up and scan final clusters function
+#' @export
+SecondPassClusters <- function(rmatMyDataClus, rmatMyData, report_name, Min.Clus.size, Report.type) {
   Cluster.Found <- FALSE # boolean storing position in/out of cluster
   cluster_counter <- 0 # counter for the total number of clusters in contig
   clustered_genes <- 0 # counter for the total number of genes in cluster in contig
@@ -486,9 +394,9 @@ SecondPassClusters<-function(rmatMyDataClus, rmatMyData, report_name, Min.Clus.s
     if (
       (rmatMyDataClus[i,i] == 1) &&
       (Cluster.Found == FALSE)
-     ) { # first gene of a cluster
+    ) { # first gene of a cluster
       Cluster.Found <- TRUE
-      #clustered_genes<-1
+      clustered_genes <- 1
       cluster_start <- rownames(rmatMyData)[i - 1]
       start_i <- i - 1
     } else if (
@@ -645,22 +553,61 @@ SecondPassClusters<-function(rmatMyDataClus, rmatMyData, report_name, Min.Clus.s
 }
 
 
-###########################################################################
-# Master function:
-###########################################################################
 
+#' Run the master clustering pipeline
+#'
+#' @param MyData The dataset loaded from input file.
+#' @param AnalysisName The name of the analysis/dataset.
+#' @param MyCut correlation threshold [0 to 1] from the averaged matrix (see [*1])
+#' @param UseQuantile, boolean, whether to use quantile (TRUE) or corr coeff (FALSE) of averaged matrix as threshold
+#' @param Edge.Fill.rate, % of cells above correlation threshold in the edge of a submatrix to proceed further in cluster detection [0 to 1]
+#' @param Edge.Fill.rate Defines the % of matrix cells in the horizontal and
+#'  vertical edges of cluster triangles that need to be above the correlation
+#'  threshold. Numeric between 0 (any number of cells) and 1 (all cells). Self
+#'  correlations are taken into account.
+#' @param Surface.Fill.rate, % of cells above correlation threshold in a submatrix call a cluster [0 to 0.5]
+#' @param Surface.Fill.rate Defines the % of the cells of the cluster triangle
+#'  that must be above the correlation threshold. Numeric between 0
+#'  (any number of cells) and 1 (all cells). Self correlations are ignored.
+#' @param Min.Clus.size, Minimum number of genes in a cluster during first pass detection
+#' @param Min.Clus.size defines the minimal size above which clusters are
+#'  detected. This parameter is used both on first and second pass detection,
+#'  meaning that the final list of clusters does not necessarily reflect how
+#'  they were initially detected. As a result you might find clusters of
+#'  size eg 20 with a small Min.Clus.size value, while no cluster will be
+#'  detected if Min.Clus.size is set to 20.
+#' @param Gap.penalty, Reduces the relative max gap length [positive] (see [*2])
+#' @param Gap.penalty Sets the % of matrix cells in the diagonal edge of
+#'  cluster triangles (not counting self-correlations) that need to be above
+#'  the correlation threshold. 1 is neutral, numeric between 0 and 1 will relax
+#'  threshold, numeric above 1 will increase stringency.
+#' @param Report.type none, mini, genelist, normal or verbose
+#' @returns
+#'
+#' @examples
+#' RunClusterDetection(
+#'   MyData,
+#'   AnalysisName,
+#'   MyCut = xx,
+#'   Edge.Fill.rate = xx,
+#'   Surface.Fill.rate = xx,
+#'   Min.Clus.size = x,
+#'   Gap.penalty = x,
+#'   verbose = x
+#' )
+#' @export
 RunClusterDetection <- function(
   MyData,
   MyGeneNames,
   AnalysisName,
-  MyCut, # correlation threshold [0 to 1] from the averaged matrix (see [*1])
-  UseQuantile, # boolean, whether to use quantile (TRUE) or corr coeff (FALSE) of averaged matrix as threshold
-  Edge.Fill.rate, # % of cells above correlation threshold in the edge of a submatrix to proceed further in cluster detection [0 to 1]
-  Surface.Fill.rate, # % of cells above correlation threshold in a submatrix call a cluster [0 to 0.5]
-  Min.Clus.size, # Minimum number of genes in a cluster during first pass detection
-  Gap.penalty, # Reduces the relative max gap length [positive] (see [*2])
+  MyCut,
+  UseQuantile,
+  Edge.Fill.rate,
+  Surface.Fill.rate,
+  Min.Clus.size,
+  Gap.penalty,
   Report.type
-) { # none, mini, genelist, normal or verbose
+) {
   StartAll.time <- Sys.time()
   Gap.penalty <- (1 / Gap.penalty)
 
@@ -704,7 +651,7 @@ RunClusterDetection <- function(
       sep = "\n",
       append = TRUE
     )
-  } else if (Report.type == "none" ) {
+  } else if (Report.type == "none") {
     cat("\nNo report file mode")
   }
 
@@ -715,7 +662,7 @@ RunClusterDetection <- function(
   rmatMyData <- RawCorMat(MyData, MyGeneNames)
   MySize <- sqrt(length(rmatMyData))
   StepDuration <- difftime(Sys.time(), StartStep.time, units="secs")
-  if ((Report.type == "normal") || (Report.type=="verbose")) {
+  if ((Report.type == "normal") || (Report.type =="verbose")) {
     cat(
       paste("1. Pairwise correlation calculation runtime: ", StepDuration),
       file = report_name,
