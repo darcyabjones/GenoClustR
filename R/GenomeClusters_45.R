@@ -28,7 +28,7 @@ gene_corr <- function(data, gene_names = NULL) {
 #' Finds the number of off diagonal cells in an upper triangle
 #' given a grid position.
 triangle_size <- function(i, j) {
-  offset <- abs(i - j)
+  offset <- abs(i - j) + 1
   off_diagonal <- offset * (offset - 1)
   upper <- off_diagonal / 2
   return(upper)
@@ -54,6 +54,27 @@ sum_child_nodes <- function(sums, i, j) {
 }
 
 
+#' Calculates the positions of the upper triangle in diagonal order.
+#' Intended for use with iteration.
+#' @param index The index to find a grid coordinate for.
+#' @param size The size of the matrix you're iterating over.
+#'
+#' Returns a list with the grid coordinates (i, j), and the
+#' distance from the center diagonal (k).
+index_to_diag_ij <- function(index, size, include_diag = FALSE) {
+  if (include_diag && (index <= size)) {
+    return(list(i = index, j = index, k = 0))
+  } else if (include_diag) {
+    index <- index - size
+  }
+  i <- size - 1 - floor(sqrt(- 8 * index + 4 * size * (size - 1) + 1) / 2 - 0.5)
+  j <- index + i + ((size - i + 1) * (size - i) - size * (size - 1)) / 2
+  i <- j - i
+  k <- abs(i - j)
+  return(list(i = i, j = j, k = k))
+}
+
+
 #' Generate average correlation matrix.
 #'
 #' For each off diagonal cell in the upper triangle of a square matrix
@@ -61,7 +82,7 @@ sum_child_nodes <- function(sums, i, j) {
 #' (i.e. sum(mat[i:j, i:j]) if the diagonal and lower triangle are all 0).
 #'
 #' @export
-average_corr <- function(data) {
+average_corr <- function(data, bandwidth = NULL) {
 
   averages <- sums <- matrix(
     nrow = nrow(data),
@@ -69,24 +90,34 @@ average_corr <- function(data) {
   )
 
   diag(data) <- NA
+  size <- nrow(data)
+  n_cells <- (size * (size - 1)) / 2
 
-  for (k in seq_len(nrow(data) -  1)) {
-    k <- k - 1
+  if (is.null(bandwidth)) {
+    bandwidth <- size
+  }
 
-    for (i in seq_len(nrow(data) - k - 1)) {
-      j <- i + 1 + k
+  for (h in seq_len(n_cells)) {
+    indices <- index_to_diag_ij(h, nrow(data))
+    i <- indices$i
+    j <- indices$j
+    k <- indices$k
 
-      this_corr <- data[i, j]
-      # On the first diagonal, we just want the raw values.
-      if (k == 0) {
-        this_sum <- this_corr
-      } else {
-        this_sum <- sum_child_nodes(sums, i, j) + this_corr
-      }
-
-      sums[i, j] <- this_sum
-      averages[i, j] <- this_sum / triangle_size(i, j)
+    if (k > bandwidth) {
+      break
     }
+
+    this_corr <- data[i, j]
+
+    # On the first diagonal, we just want the raw values.
+    if (k == 1) {
+      this_sum <- this_corr
+    } else {
+      this_sum <- sum_child_nodes(sums, i, j) + this_corr
+    }
+
+    sums[i, j] <- this_sum
+    averages[i, j] <- this_sum / triangle_size(i, j)
   }
   return(averages)
 }
@@ -96,7 +127,7 @@ average_corr <- function(data) {
 threshold_matrix <- function(data, threshold) {
   thresholded <- apply(
     data >= threshold,
-    MARGIN = 1,
+    MARGIN = 2,
     FUN = as.numeric
   )
   thresholded[is.na(thresholded)] <- 0
@@ -111,35 +142,123 @@ t2 <- function(mat) {
 }
 
 
-#' Cluster detection (1) - cluster edges and gaps function
-#' takes filtered matrix and i and j coordinates as input
-#' @export
-calc_edges_and_gaps <- function(data, i, j) {
+#' Check if a matrix is square.
+is_square <- function(mat) {
+  return(nrow(mat) != ncol(mat))
+}
 
-  # Unsure why this is needed like this.
-  # Why not ncol(data)?
-  # If we have assertion that data is square, we can switch.
-  mat_size <- sqrt(length(data))
 
-  # checking % of cells at the edge of cluster triangle above
-  # correlation threshold
-  hor_edge <- 0
-  ver_edge <- 0
-  gap <- 0
-  d <- 0
-  for (e in 0:(mat_size - (i + j))) {
-    hor_edge <- hor_edge + data[i, j + e]
-    ver_edge <- ver_edge + data[i + e, j]
-    if (data[i + e, (mat_size - i - e)] == 1) {
-      d <- 0
-    } else {
-      d <- d + 1
-    }
-    gap <- c(gap, d)
+#' Find a square matrix's size
+#' Asserts that the matrix is square.
+find_matrix_size <- function(mat) {
+  if (!is_square(mat)) {
+    stop("Matrix must be square.")
   }
 
-  # only diag considered for gap checking
-  return(c(min(hor_edge, ver_edge), max(gap)))
+  return(nrow(mat))
+}
+
+
+#' Find the coordinates of diagonals in a square matrix.
+#' Can only get upper diagonal coordinates.
+#' @param mat the matrix that you want to get coords from.
+#'  This is only used to get the size of the matrix.
+#' @param offset the diagonal to get. 0 is the main diagonal,
+#'  1 will be the adjacent n-1 diagonal etc.
+diag_indices <- function(mat, offset = 0) {
+  nrows <- nrow(mat)
+
+  if (nrows <= 1) {
+    stop("Matrix is too small.")
+  }
+
+  if (offset < 0) {
+    stop("We only support positive offsets.")
+  }
+
+  len <- nrows - offset
+
+  indices <- matrix(0, nrow = len, ncol = 2)
+  indices[,1] <- 1:len
+  indices[,2] <- indices[,1] + offset
+  return(indices)
+}
+
+
+#' Finds gaps in the first offset diagonal of a matrix.
+#' @param mat The matrix to find gaps in. This must be a binary indicator
+#'  matrix where 1 says the cell has passed a threshold. We don't check that
+#'  this is true so make sure it is in the function passing the matrix.
+#' @returns An (n-1) vector with gaps marked as 1 and non-gaps as 0.
+find_gaps <- function(mat) {
+  out <- (1 - mat[diag_indices(mat, offset=1)])
+  return(out)
+}
+
+
+#' Finds the scanning cumulative sum of a vector, resetting the
+#' counter whenever it encounters a 0.
+#' @returns An (n-1) vector with the cumulative sum of gaps since the last
+#'  non-gap. E.g. 0, 1, 2, 0 means that the second and third positions are gaps
+#'  and the first and 4th are non-gaps.
+resetting_cumsum <- function(gaps) {
+  Reduce(
+    function(i, j) ifelse(j==0, 0, i + j),
+    x = gaps,
+    accumulate = TRUE
+  )
+}
+
+
+find_max_gap <- function(gaps, i, j) {
+  vec <- gaps[i:(j - 1)]
+  return(max(vec))
+}
+
+
+#' Find the edge score for a given triangle in a square matrix.
+#' The edge score is the minimum sum of cells on the outer row or column
+#' of the triangle where the cell passed the threshold.
+#'
+#' @param mat A binary indicator matrix, where 1 indicates that the cell passed
+#'  the threshold. Note that only the upper triangle is used.
+#' @param bandwidth The maximum triangle size that will be considered.
+#'  Used to reduce run-time and memory requirements.
+#'
+#' @returns A matrix with the upper triangle populated with edge scores for
+#'  each potential cluster.
+find_edges <- function(mat, bandwidth = NULL) {
+  sums_i <- matrix(0, nrow(mat), ncol(mat))
+  sums_j <- matrix(0, nrow(mat), ncol(mat))
+  mins <- matrix(0, nrow(mat), ncol(mat))
+
+  size <- nrow(mat)
+  n_cells <- (size * (size - 1)) / 2
+
+  if (is.null(bandwidth)) {
+    b_cells <- 0
+    bandwidth <- size
+  } else {
+    b_cells <- ((size - bandwidth) * (size - bandwidth - 1)) / 2
+  }
+  for (h in seq_len(n_cells - b_cells)) {
+    indices <- index_to_diag_ij(h, nrow(mat))
+
+    this <- mat[indices$i, indices$j]
+    if (indices$k <= 1) {
+      child_i <- child_j <- 0
+    } else if (indices$k >= bandwidth) {
+      break
+    } else {
+      child_j <- sums_j[indices$i, indices$j - 1]
+      child_i <- sums_i[indices$i + 1, indices$j]
+    }
+
+    sums_j[indices$i, indices$j] <- child_j + this
+    sums_i[indices$i, indices$j] <- child_i + this
+    mins[indices$i, indices$j] <- min(c(child_j, child_i)) + this
+  }
+  return(mins)
 }
 
 
@@ -238,7 +357,7 @@ first_pass_clusters <- function(
         filtered,
         i,
         j,
-        min_clust_size,
+        min_clust_size
       )
 
       if (skip_cell) {
@@ -586,4 +705,88 @@ detect_clusters <- function(
   diag(final) <- diag(clustered)
 
   final[upper.tri(final)] <- correlated[upper.tri(correlated)]
+}
+
+
+#' Find clusters satisfying threshold criteria.
+#'
+#' @param edge_mins
+#' @param surface_means
+#' @param gaps
+#' @param edge_fill_rate
+#' @param gap_penalty
+#' @param surface_fill_rate
+#' @param min_cluster
+#' @param max_cluster
+#'
+#' @returns
+find_clusters <- function(
+  edge_mins,
+  surface_means,
+  gaps,
+  edge_fill_rate = 0.5,
+  gap_penalty = 0.5,
+  surface_fill_rate = 0.5,
+  min_cluster = 4,
+  max_cluster = NULL
+) {
+  size <- nrow(edge_mins)
+  if (is.null(max_cluster)) {
+    max_cluster <- size - 1
+  }
+
+  offset_max <- min(c(size - 1, max_cluster))
+  offset_min <- max(c(min_cluster, 2))
+
+  if (min_cluster > max_cluster) {
+    stop("max_cluster must be greater than or equal to min_cluster.")
+  }
+
+  cluster_index <- 1
+  clusters <- list()
+  #clusters <- matrix(FALSE, nrow = nrow(edge_mins), ncol = ncol(edge_mins))
+
+  skip <- logical(size)
+
+  for (k in offset_max:offset_min) {
+    indices <- diag_indices(edge_mins, k)
+    for (h in seq_len(nrow(indices))) {
+      i <- indices[h, 1]
+      j <- indices[h, 2]
+
+      # This means that a larger cluster has already included this range.
+      if (all(skip[j:i])) {
+        next
+      }
+
+      edge_score <- edge_mins[i, j] / (k + 1)
+      max_gap <- find_max_gap(gaps, i, j)
+
+      if (edge_score < edge_fill_rate) {
+        next
+      } else if (max_gap >= (gap_penalty * (1 - edge_fill_rate) * (k + 1)) ) {
+        next
+      }
+
+      surface_mean <- surface_means[i, j]
+
+      if (surface_means[i, j] < surface_fill_rate) {
+        next
+      }
+
+      clusters[[cluster_index]] <- as.data.frame(t(c(
+        start=i,
+        end=j,
+        edge_score=edge_score,
+        max_gap=max_gap,
+        surface_mean=surface_mean,
+        size=k + 1
+      )))
+      cluster_index = cluster_index + 1
+
+      skip[i:j] <- TRUE
+    }
+  }
+  clusters <- do.call(rbind, clusters)
+  return(clusters)
 }

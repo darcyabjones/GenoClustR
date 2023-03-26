@@ -15,30 +15,20 @@ knitr::opts_chunk$set(
 ```
 
 ```{r setup}
-library('GenoClustR')
+#library('GenoClustR')
+devtools::load_all()
 library('rlang')
 library('ggplot2')
 library("Hmisc")
 library('gplots')
-```
-
-```{r}
-data("sclero")
-```
-
-```{r}
-sclero[1:5, 1:5]
-```
-
-```{r}
-# Define your favorite color palette:
-mypalette <- colorRampPalette(c("darkblue", "blue", "cornflowerblue", "lightblue", "white", "white", "goldenrod1", "orangered", "darkred"), space="rgb")
+library("WGCNA")
+enableWGCNAThreads()
 ```
 
 
 ```{r}
 # Load your input file containing expression data under the name "MyData"
-sclero_test <- sclero[1:5,]
+sclero_test <- sclero
 #save(sclero_test, file = "../tests/testthat/data/sclero_test.rda")
 # Load your input file containing ordered list of genes on contig
 MyGeneNames <- rownames(sclero_test)
@@ -53,46 +43,123 @@ AnalysisName <- "MyAnalysis"
 ```
 
 ```{r}
-sclero_test_corr <- gene_corr(sclero_test, MyGeneNames)
-sclero_test_ave_corr <- average_corr(sclero_test_corr)
-sclero_test_corr
-
-sclero_test_ave_corr
+raw <- two_noisy_clusters(seed = 123)
+raw_cov <- raw$covariance
+raw <- raw$features
+raw_cov <- gene_corr(sclero_test)
 ```
 
 ```{r}
-matrix(data=as.vector(ave_corr), nrow=10, ncol=10)
+#heatmap(raw_cov, Rowv = NA, Colv = NA, symm = TRUE)
+```
+
+```{r}
+system.time(test_ave_corr <- average_corr(raw_cov, bandwidth = 50))
+#test_ave_corr[1:5, 1:5]
+#heatmap(test_ave_corr, Rowv = NA, Colv = NA, symm = TRUE)
+```
+
+```{r}
+filtered <- threshold_matrix(test_ave_corr, 0.5)
+#heatmap(filtered, Rowv = NA, Colv = NA, symm = TRUE)
+```
+
+```{r}
+edge_mins <- find_edges(filtered, bandwidth = 50)
+#heatmap(edge_mins, Rowv = NA, Colv = NA, symm = TRUE)
+```
+
+```{r}
+gaps <- find_gaps(filtered) #
 ```
 
 
+```{r}
+surface_means <- average_corr(filtered, bandwidth = 50)
+surface_means[1:5, 1:5]
+```
+
 
 ```{r}
-# Run the master function by typing in:
-results <- RunClusterDetection(
-  MyData,
-  MyGeneNames,
-  AnalysisName,
-  UseQuantile = FALSE,
-  MyCut = 0.5,
-  Edge.Fill.rate = 0.3,
-  Surface.Fill.rate = 0.1,
-  Min.Clus.size = 4,
-  Gap.penalty = 1,
-  Report.type = "verbose"
+clusters <- find_clusters(
+  edge_mins,
+  surface_means,
+  gaps,
+  edge_fill_rate = 0.7,
+  min_cluster = 4,
+  max_cluster = 50
 )
 ```
 
+
 ```{r}
-#sclero_test_corr <- sclero_test_corr[1:4,1:4]
+#heatmap(filtered, Rowv = NA, Colv = NA, symm = TRUE)
 ```
 
 
+
 ```{r}
-for (k in seq_len(nrow(sclero_test_corr) -  1)) {
-  k <- k - 1
-  for (i in seq_len(nrow(sclero_test_corr) - k - 1)) {
-    j <- i + 1 + k
-    print(paste(i, j))
-  }
+#heatmap(1 * clusters, Rowv = NA, Colv = NA, symm = TRUE)
+clusters
+```
+
+```{r}
+refine_clusters <- function(clusters, thresholded, surface_means) {
+  
+  
 }
 ```
+
+```{r}
+test_ave_corr[7200:7213, 7200:7213]
+raw_cov[7200:7213, 7200:7213]
+```
+
+```{r}
+plotit <- function(li) {
+  heatmap(li$covariance, Rowv = NA, Colv = NA, symm = TRUE)
+  heatmap(cor(li$features), Rowv = NA, Colv = NA, symm = TRUE)
+  print(quantile(cor(li$features)))
+}
+
+#plotit(no_clusters(seed = 14))
+#s <- c(1, 2, 3, 14)
+
+#plotit(one_cluster(seed = 27))
+#s <- c(17, 19, 22, 27)
+
+#plotit(two_clusters(seed = 31))
+#s <- c(28, 29, 30, 31)
+
+#plotit(five_clusters(seed = 38))
+#s <- c(33, 35, 37, 38)
+
+#plotit(two_covarying_clusters(seed = 42))
+#s <- c(39, 40, 41, 42)
+
+#plotit(five_covarying_clusters(seed = 48))
+#s <- c(44, 46, 46, 48)
+
+#plotit(one_gappy_cluster(seed = 56))
+#s <- c(50, 51, 52, 56)
+
+#plotit(two_gappy_clusters(seed = 60))
+#s <- c(57, 58, 59, 60)
+
+#plotit(five_gappy_clusters(seed = 68))
+#s <- c(64, 66, 67, 68)
+
+#plotit(one_noisy_cluster(seed = 83))
+#s <- c(74, 81, 82, 83)
+
+#plotit(two_noisy_clusters(seed = 107))
+#s <- c(92, 94, 100, 107)
+
+#plotit(five_noisy_clusters(seed = 123))
+#s <- c(116, 120, 121, 123)
+
+```
+
+
+
+
