@@ -450,3 +450,29 @@ five_noisy_covarying_clusters <- function(seed = NULL) {
     features = features
   ))
 }
+
+
+#' Case with two 6-clusters with gap at each end and between each other.
+#' @param seed Initialise the random number generator
+two_overlapping_gappy_clusters <- function(seed = NULL) {
+  clusters <- matrix(
+    c(
+      3, 11,
+      10, 18
+    ),
+    nrow = 2,
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(1:2, c("start", "end"))
+  )
+
+  return(generate_simple_clusters(
+      20,
+      30,
+      clusters,
+      sigma = 3,
+      sigma_intraclust = 0.9,
+      sigma_interclust = 0.0,
+      seed = seed
+  ))
+}

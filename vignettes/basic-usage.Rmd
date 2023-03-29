@@ -43,76 +43,98 @@ AnalysisName <- "MyAnalysis"
 ```
 
 ```{r}
-raw <- two_noisy_clusters(seed = 123)
-raw_cov <- raw$covariance
+raw <- two_overlapping_gappy_clusters(seed = 123)
+raw_cov <- raw$covariance #/ 2
+diag(raw_cov) <- 1
 raw <- raw$features
-raw_cov <- gene_corr(sclero_test)
+#raw_cov <- gene_corr(sclero_test)
 ```
 
 ```{r}
-#heatmap(raw_cov, Rowv = NA, Colv = NA, symm = TRUE)
-```
-
-```{r}
-system.time(test_ave_corr <- average_corr(raw_cov, bandwidth = 50))
-#test_ave_corr[1:5, 1:5]
-#heatmap(test_ave_corr, Rowv = NA, Colv = NA, symm = TRUE)
-```
-
-```{r}
-filtered <- threshold_matrix(test_ave_corr, 0.5)
-#heatmap(filtered, Rowv = NA, Colv = NA, symm = TRUE)
-```
-
-```{r}
-edge_mins <- find_edges(filtered, bandwidth = 50)
-#heatmap(edge_mins, Rowv = NA, Colv = NA, symm = TRUE)
-```
-
-```{r}
-gaps <- find_gaps(filtered) #
-```
-
-
-```{r}
-surface_means <- average_corr(filtered, bandwidth = 50)
-surface_means[1:5, 1:5]
-```
-
-
-```{r}
-clusters <- find_clusters(
-  edge_mins,
-  surface_means,
-  gaps,
-  edge_fill_rate = 0.7,
+threshold_clustering <- function(
+  adjacency,
+  threshold = 0.8,
+  edge_fill_rate = 0.8,
+  surface_fill_rate = 0.6,
+  gap_penalty = 0.5,
   min_cluster = 4,
-  max_cluster = 50
-)
-```
-
-
-```{r}
-#heatmap(filtered, Rowv = NA, Colv = NA, symm = TRUE)
-```
-
-
-
-```{r}
-#heatmap(1 * clusters, Rowv = NA, Colv = NA, symm = TRUE)
-clusters
-```
-
-```{r}
-refine_clusters <- function(clusters, thresholded, surface_means) {
+  max_cluster = NULL,
+  smooth = "average",
+  merge = TRUE,
+  merge_threshold = 1.1,
+  verbose = FALSE
+) {
+  # We want to avoid mutating anything.
+  adjacency <- adjacency
   
+  if (verbose && (smooth %in% c("average", "TOM"))) {
+    print(sprintf("- Running %s smoothing", smooth))
+  }
+  if (smooth == "average") {
+    smoothed <- average_corr(adjacency, bandwidth = max_cluster)
+  } else if (smooth == "TOM") {
+    smoothed <- TOMsimilarity(adjacency)
+  } else {
+    smoothed <- adjacency
+  }
   
+  adjacency[lower.tri(adjacency)] <- NA
+  smoothed[lower.tri(smoothed)] <- NA
+  
+  smoothed <- threshold_matrix(smoothed, threshold = threshold)
+  
+  if (verbose) {
+    print("- Finding edges")
+  }
+  edge_mins <- find_edges(smoothed, bandwidth = max_cluster)
+  
+  if (verbose) {
+    print("- Finding surface means")
+  }
+  surface_means <- average_corr(smoothed, bandwidth = max_cluster)
+  gaps <- find_gaps(smoothed)
+  
+  if (verbose) {
+    print("- Finding clusters")
+  }
+  clusters1 <- find_threshold_clusters(
+    adjacency = adjacency, 
+    edge_mins = edge_mins,
+    surface_means = surface_means,
+    gaps = gaps,
+    edge_fill_rate = edge_fill_rate,
+    gap_penalty = gap_penalty,
+    surface_fill_rate = surface_fill_rate,
+    min_cluster = min_cluster,
+    max_cluster = max_cluster
+  )
+  
+  if (merge) {
+    if (verbose) {
+      print("- Merging clusters")
+    }
+    clusters2 <- merge_threshold_clusters(
+      clusters = clusters1,
+      adjacency = adjacency,
+      surface_means = surface_means,
+      edge_mins = edge_mins,
+      gaps = gaps,
+      merge_threshold = merge_threshold
+    )
+  }
+ 
+  out <- list(
+    clusters = clusters2,
+    smoothed = smoothed,
+    surface_means = surface_means,
+    edge_mins = edge_mins
+  )
+  return(out)
 }
-```
 
-```{r}
-test_ave_corr[7200:7213, 7200:7213]
-raw_cov[7200:7213, 7200:7213]
+out <- threshold_clustering(1 * (raw_cov > 0.7), min_cluster = 4, max_cluster = 50)
+out$clusters
+out$init_clusters
 ```
 
 ```{r}
