@@ -1,0 +1,481 @@
+---
+title: "basic-usage"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{basic-usage}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+#library('GenoClustR')
+devtools::load_all()
+library('rlang')
+library('ggplot2')
+library("Hmisc")
+library('gplots')
+library("WGCNA")
+enableWGCNAThreads()
+```
+
+```{r}
+plotit <- function(mat) {
+  heatmap(mat, Rowv = NA, Colv = NA, symm = TRUE)
+}
+```
+
+```{r}
+cor <- matrix(0, nrow = 200, ncol = 200)
+diag(cor) <- 1
+
+cor[5:15, 5:15] <- 1 # Clean separation
+
+cor[20:25, 20:25] <- 1 # Non-overlapping but adjacent
+cor[26:31, 26:31] <- 1
+
+cor[36:41, 36:41] <- 1 # Small overlap
+cor[41:46, 41:46] <- 1
+
+cor[50:60, 50:60] <- 1 # Mid overlap
+cor[55:65, 55:65] <- 1
+
+cor[70:80, 70:80] <- 1 # Large overlap
+cor[72:82, 72:82] <- 1
+
+cor[85:95, 85:95] <- 1 # Small overlap big clusters
+cor[95:105, 95:105] <- 1
+
+
+set.seed(123)
+# big and noisy :)
+cor[107:117, 107:117] <- rbinom(11 ** 2, 1, 0.9)
+
+cor[120:130, 120:130] <- rbinom(11 ** 2, 1, 0.8)
+
+cor[135:145, 135:145] <- rbinom(11 ** 2, 1, 0.7)
+
+cor[150:160, 150:160] <- rbinom(11 ** 2, 1, 0.6)
+
+cor[165:175, 165:175] <- rbinom(11 ** 2, 1, 0.5)
+
+cor[180:190, 180:190] <- rbinom(11 ** 2, 1, 0.4)
+
+cor[195:200, 195:200] <- rbinom(6 ** 2, 1, 0.2)
+cor[lower.tri(cor)] <- t(cor)[lower.tri(cor)]
+diag(cor) <- 1
+
+plotit(cor)
+
+#data(sclero)
+
+#cor <- abs(cor(t(sclero)))
+#cor <- 1 * (cor > 0.7)
+
+cor_tom <- TOMsimilarity(cor)
+plotit(cor_tom)
+#cor <- cor_tom
+cor[1:10, 1:10]
+```
+
+
+
+So how does the thresholded pipeline do?
+
+```{r}
+threshold_clustering(cor, max_cluster = 50)$clusters
+```
+
+Pretty good actually.
+The only one it didn't get right was the gappy cluster, which had the boundaries wrong.
+Incidentally, this is the one that is most likely to have issues with the thresholding method.
+
+Most of these examples are pretty easy, but they're the clear cases that any method should be able to deal with.
+
+What if we use the WGCNA method for cleaning clusters instead?
+
+```{r}
+#threshold_clustering(cor, max_cluster = 50, smooth = "TOM")$clusters
+```
+
+It fails to merge the "mid overlap" cluster (it's debatable about whether this should be merged), but does better with the gappy cluster.
+I think probably this is the more reliable method.
+
+
+So what else can we do?
+
+```{r}
+## from http://tr.im/hH5A
+logsumexp <- function (x) {
+  y <- max(x)
+  y + log(sum(exp(x - y)))
+}
+
+softmax <- function (x) {
+  x <- x + min(x)
+  exp(x - logsumexp(x))
+}
+
+
+unity <- function(xi, xj) {
+  return(1)
+}
+
+
+rbf <- function(xi, xj, std = 1, power = 2) {
+  ratio <- (abs(xi - xj) ** 2) / (2 * (std ** power))
+  return(exp(-1 * ratio))
+}
+
+gen_pm_features <- function(mat, context = 3, dist_penalty = unity) {
+  # p_rev, p_fwd, p_none
+  out <- matrix(NA, nrow = nrow(mat), ncol = 4)
+  for (i in seq_len(nrow(mat))) {
+    fwd_ <- numeric(context)
+    rev_ <- numeric(context)
+
+    for (j in seq_len(context)) {
+      if ((i + j) >  nrow(mat)) {
+        f <- 0
+      } else {
+        f <- mat[i, (i + j)]
+      }
+      dp <- dist_penalty(1, j)
+      
+      fwd_[j] <- dp * f
+      
+      if ((i - j) <= 0) {
+        r <- 0
+      } else {
+        r <- mat[i, (i - j)]
+      }
+      
+      rev_[j] <- dp * r
+    }
+
+    fwd_ <- (fwd_ - 0.5) * 2
+    rev_ <- (rev_ - 0.5) * 2
+
+    both_ <- sum(c(fwd_, rev_), na.rm = FALSE)
+    fwd2_ <- sum(c(fwd_, -1 * rev_), na.rm = FALSE)
+    rev2_ <- sum(c(-1 * fwd_, rev_), na.rm = FALSE)
+    neither_ <- sum(-1 * c(fwd_, rev_), na.rm = FALSE)
+    
+    out[i,] <- softmax(c(rev2_, fwd2_, both_, neither_))
+  }
+  colnames(out) <- c("rev", "fwd", "both", "neither")
+  return(out)
+}
+
+heatmap(gen_pm_features(cor, context = 4), Rowv = NA, Colv = NA)
+
+gen_pm_features(cor, context = 10, dist_penalty = function(xi, xj) {rbf(xi, xj, std = 2, power = 4)})
+```
+
+$transProbs
+               to
+from             nocluster cluster_start    cluster cluster_end
+  nocluster     0.70503419    0.22859469 0.03284794  0.03352318
+  cluster_start 0.03613480    0.64380925 0.21054008  0.10951588
+  cluster       0.03959185    0.04893161 0.67604962  0.23542692
+  cluster_end   0.24633205    0.06610597 0.04377526  0.64378672
+
+```{r}
+transition_table <- matrix(0, nrow = 4, ncol = 4)
+rownames(transition_table) <- colnames(transition_table) <- states <- c("nocluster", "cluster_start", "cluster", "cluster_end")
+
+transition_table["cluster_end", "nocluster"] <- 0.25
+transition_table["nocluster", "nocluster"] <- 0.75
+
+transition_table["cluster_start", "cluster"] <- 0.1
+transition_table["cluster", "cluster"] <- 0.9
+
+transition_table["cluster_start", "cluster_end"] <- 0.1
+transition_table["cluster", "cluster_end"] <- 0.9
+
+transition_table["cluster_end", "cluster_start"] <- 0.5
+transition_table["nocluster", "cluster_start"] <- 0.5
+
+
+heatmap(transition_table, Rowv = NA, Colv = NA)
+```
+
+
+$emissionProbs
+               symbols
+states                 rev        fwd       both    neither
+  nocluster     0.04412888 0.04413120 0.03156040 0.88017952
+  cluster_start 0.05257447 0.85767542 0.04419816 0.04555196
+  cluster       0.08585462 0.08588891 0.78916555 0.03909092
+  cluster_end   0.85825106 0.05263497 0.04423603 0.04487795
+
+```{r}
+start_table = matrix(0, nrow = 1, ncol = 4)
+colnames(start_table) <- c("nocluster", "cluster_start", "cluster", "cluster_end")
+start_table[1, ] <- c(0.99, 0.01, 0.0, 0.0)
+
+emission_table <- matrix(0, nrow = 4, ncol = 4)
+rownames(emission_table) <- c("nocluster", "cluster_start", "cluster", "cluster_end")
+colnames(emission_table) <- symbols <- c("rev", "fwd", "both", "neither")
+emission_table["cluster_start",] <- c(0.25, 0.45, 0.25, 0.05)
+emission_table["cluster",] <- c(0.1, 0.1, 0.75, 0.05)
+emission_table["cluster_end",] <- c(0.45, 0.25, 0.25, 0.05)
+emission_table["nocluster",] <- c(0.05, 0.05, 0.05, 0.85)
+heatmap(emission_table, Rowv = NA, Colv = NA)
+```
+
+```{r}
+obs_pm <- gen_pm_features(cor, context = 6)
+obs <- colnames(obs_pm)[apply(obs_pm, MARGIN = 1, FUN = which.max)]
+```
+
+
+```{r}
+heatmap(obs_pm, Rowv = NA, Colv = NA)
+```
+
+```{r}
+emission_table
+```
+
+```{r}
+heatmap(t(obs_pm[1:10,]), Rowv = NA, Colv = NA, scale = "none")
+heatmap(emissions[, 1:10], Rowv = NA, Colv = NA, scale = "none")
+heatmap(emission_table[, obs[1:10]], Rowv = NA, Colv = NA, scale = "none")
+```
+
+```{r}
+trellis <- matrix(0, nrow = length(states), ncol = length(obs))
+rownames(trellis) <- states
+
+pointers <- matrix(0, nrow = length(states), ncol = length(obs))
+rownames(pointers) <- states
+```
+
+```{r}
+# initial state
+emission_table <- log(emission_table)
+transition_table <- log(transition_table)
+start_table <- log(start_table)
+```
+
+
+```{r}
+weighted_obs <- function(obs, emission_table) {
+  multiplied <- t(t(emission_table) + obs)
+  
+  # Taking exp is important because we're in log space
+  weighted_score <- rowSums(exp(multiplied))
+  
+  # Convert back to log for stability
+  return(log(weighted_score))
+}
+
+weighted_obs(log(obs_pm[1,]), emission_table)
+```
+
+
+```{r}
+# initial state
+emissions <- apply(
+  log(obs_pm),
+  MARGIN = 1,
+  FUN = function(x) {weighted_obs(x, emission_table)}
+)
+
+#emissions <- emission_table[, obs]
+emission_preds <- rownames(emissions)[apply(emissions, MARGIN = 2, FUN = which.max)]
+
+trellis[, 1] <- t(start_table + emissions[, 1])
+
+for (o in seq_len(ncol(trellis) - 1)) {
+  o <- o + 1
+  for (state in states) {
+    k <- trellis[, o - 1] + transition_table[, state] + emissions[state, o]
+    top <- names(which.max(k))
+    trellis[state, o] <- k[top]
+    pointers[state, o] <- top
+  }
+}
+```
+
+
+```{r}
+best_state <- names(which.max(trellis[, ncol(trellis)]))
+best_path <- character(ncol(trellis))
+
+for (i in rev(seq_len(ncol(trellis)))) {
+  best_path[i] <- best_state
+  best_state <- pointers[best_state, i]
+}
+```
+
+
+```{r}
+min_cluster <- 5
+ranges <- list()
+
+h <- 1
+last_start <- NULL
+for (i in seq_along(best_path)) {
+  state <- best_path[i]
+  if (state == "cluster_start") {
+    if (!is.null(last_start)) {
+      stop("this shouldn't happen")
+    }
+    last_start <- i
+  } else if (state == "cluster_end") {
+    if (is.null(last_start)) {
+      stop("this shouldn't happen")
+    }
+    
+    if ((abs(last_start - i) + 1) >= min_cluster) {
+      ranges[[h]] <- c("start" = last_start, "end" = i)
+      h <- h + 1
+    }
+    last_start <- NULL
+  } else if (!state %in% c("cluster", "nocluster")) {
+    stop("This shouldn't happen")
+  }
+}
+
+ranges <- do.call(rbind, ranges)
+```
+
+
+cor[5:15, 5:15] <- 1 # Clean separation
+cor[20:25, 20:25] <- 1 # Non-overlapping but adjacent
+cor[26:31, 26:31] <- 1
+cor[36:41, 36:41] <- 1 # Small overlap
+cor[41:46, 41:46] <- 1
+cor[50:60, 50:60] <- 1 # Mid overlap
+cor[55:65, 55:65] <- 1
+cor[70:80, 70:80] <- 1 # Large overlap
+cor[72:82, 72:82] <- 1
+cor[85:95, 85:95] <- 1 # Small overlap big clusters
+cor[95:105, 95:105]
+cor[107:117, 107:117]
+cor[120:130, 120:130]
+cor[135:145, 135:145]
+cor[150:160, 150:160]
+cor[165:175, 165:175]
+cor[180:190, 180:190]
+cor[195:200, 195:200]
+
+
+```{r}
+ranges
+```
+
+5	15	0.9090909	0	1.0000000	11	0
+20	25	0.8333333	0	1.0000000	6	0
+26	31	0.8333333	0	1.0000000	6	0
+36	41	0.8333333	0	1.0000000	6	0
+41	46	0.8333333	0	1.0000000	6	0
+50	65	0.8750000	0	0.9916667	16	0
+70	82	0.9230769	0	1.0000000	13	0
+85	95	0.9090909	0	1.0000000	11	0
+95	105	0.9090909	0	1.0000000	11	0
+107	117	0.8181818	1	0.9090909	11	0
+140	145	0.8333333	0	1.0000000	6	0
+
+
+```{r}
+for (i in seq_len(nrow(ranges))) {
+  context <- 5
+  start <- max(c(ranges[i, "start"] - context, 1))
+  end <- min(c(ranges[i, "end"] + context, nrow(cor)))
+
+  heatmap(cor[start:end, start:end], Rowv = NA, Colv = NA, symm = TRUE)
+}
+```
+
+```{r}
+library(HMM)
+tr <- exp(transition_table)
+#rownames(tr) <- colnames(tr) <- NULL
+em <- exp(emission_table)
+#rownames(em) <- colnames(em) <- NULL
+start <- exp(start_table[1, ])
+#names(start) <- NA
+
+hmm <- initHMM(states, symbols, start, transProbs = tr, emissionProbs = em)
+hmm_bw <- baumWelch(hmm, obs, pseudoCount = 1)$hmm
+```
+
+
+```{r}
+best_path <- viterbi(hmm, observation = obs)
+
+min_cluster <- 5
+ranges <- list()
+
+h <- 1
+last_start <- NULL
+for (i in seq_along(best_path)) {
+  state <- best_path[i]
+  if (state == "cluster_start") {
+    if (!is.null(last_start)) {
+      stop("this shouldn't happen")
+    }
+    last_start <- i
+  } else if (state == "cluster_end") {
+    if (is.null(last_start)) {
+      stop("this shouldn't happen")
+    }
+    
+    if ((abs(last_start - i) + 1) >= min_cluster) {
+      ranges[[h]] <- c("start" = last_start, "end" = i)
+      h <- h + 1
+    }
+    last_start <- NULL
+  } else if (!state %in% c("cluster", "nocluster")) {
+    stop("This shouldn't happen")
+  }
+}
+
+ranges <- do.call(rbind, ranges)
+ranges
+```
+
+
+
+```{r}
+best_path <- viterbi(hmm_bw, observation = obs)
+
+min_cluster <- 5
+ranges <- list()
+
+h <- 1
+last_start <- NULL
+for (i in seq_along(best_path)) {
+  state <- best_path[i]
+  if (state == "cluster_start") {
+    if (!is.null(last_start)) {
+      stop("this shouldn't happen")
+    }
+    last_start <- i
+  } else if (state == "cluster_end") {
+    if (is.null(last_start)) {
+      stop("this shouldn't happen")
+    }
+    
+    if ((abs(last_start - i) + 1) >= min_cluster) {
+      ranges[[h]] <- c("start" = last_start, "end" = i)
+      h <- h + 1
+    }
+    last_start <- NULL
+  } else if (!state %in% c("cluster", "nocluster")) {
+    stop("This shouldn't happen")
+  }
+}
+
+ranges <- do.call(rbind, ranges)
+ranges
+```
