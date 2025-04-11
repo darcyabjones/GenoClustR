@@ -12,6 +12,8 @@ knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>"
 )
+
+options(max.print = 10000)
 ```
 
 ```{r setup}
@@ -22,6 +24,9 @@ library('ggplot2')
 library("Hmisc")
 library('gplots')
 library("WGCNA")
+library("adjclust")
+library("circlize")
+library("ComplexHeatmap")
 enableWGCNAThreads()
 ```
 
@@ -32,64 +37,89 @@ plotit <- function(mat) {
 ```
 
 ```{r}
-cor <- matrix(0, nrow = 200, ncol = 200)
-diag(cor) <- 1
+set.seed(666)
+d <- matrix(rpois(220 * 50, lambda = 0.5), nrow = 220, ncol = 50)
+true_clusters <- numeric(nrow(d))
 
-cor[5:15, 5:15] <- 1 # Clean separation
+d[5:14, 1:4] <- rpois(10 * 4, lambda = 20)
+true_clusters[5:14] <- 1
 
-cor[20:25, 20:25] <- 1 # Non-overlapping but adjacent
-cor[26:31, 26:31] <- 1
+d[20:24, 5:8] <- rpois(5 * 4, lambda = 20) # Non-overlapping but adjacent
+d[25:29, 1:4] <- rpois(5 * 4, lambda = 20)
+true_clusters[20:24] <- 2
+true_clusters[25:29] <- 3
 
-cor[36:41, 36:41] <- 1 # Small overlap
-cor[41:46, 41:46] <- 1
+d[35:40, 9:12] <- rpois(6 * 4, lambda = 20)
+d[40:45, 13:16] <- rpois(6 * 4, lambda = 20)
+true_clusters[35:40] <- 4
+true_clusters[41:45] <- 5
 
-cor[50:60, 50:60] <- 1 # Mid overlap
-cor[55:65, 55:65] <- 1
+d[50:60, 5:8] <- rpois(11 * 4, lambda = 20)
+d[55:65, 21:24] <- rpois(11 * 4, lambda = 20)
+true_clusters[50:65] <- 6
 
-cor[70:80, 70:80] <- 1 # Large overlap
-cor[72:82, 72:82] <- 1
+d[70:80, 25:28] <- rpois(11 * 4, lambda = 20)
+d[72:82, 29:32] <- rpois(11 * 4, lambda = 20)
+true_clusters[70:82] <- 7
 
-cor[85:95, 85:95] <- 1 # Small overlap big clusters
-cor[95:105, 95:105] <- 1
+d[85:95, 9:12] <- rpois(11 * 4, lambda = 20)
+d[95:105, 13:16] <- rpois(11 * 4, lambda = 20)
+true_clusters[85:105] <- 8
 
+# Gappy
+d[c(110:114, 116:120), 5:8] <- rpois(10 * 4, lambda = 20)
+true_clusters[110:120] <- 9
 
-set.seed(123)
-# big and noisy :)
-cor[107:117, 107:117] <- rbinom(11 ** 2, 1, 0.9)
+# Gap near edge
+d[c(124:131, 133:134), 25:28] <- rpois(10 * 4, lambda = 20)
+true_clusters[124:134] <- 10
 
-cor[120:130, 120:130] <- rbinom(11 ** 2, 1, 0.8)
+# 2 consecutive gaps
+d[140:143, 29:32] <- rpois(4 * 4, lambda = 20)
+d[146:150, 29:32] <- rpois(5 * 4, lambda = 20)
+true_clusters[140:150] <- 11
 
-cor[135:145, 135:145] <- rbinom(11 ** 2, 1, 0.7)
+# 2 gaps each end
+d[155:156, 33:36] <- rpois(2 * 4, lambda = 20)
+d[158:162, 33:36] <- rpois(5 * 4, lambda = 20)
+d[164:165, 33:36] <- rpois(2 * 4, lambda = 20)
+true_clusters[155:165] <- 12
 
-cor[150:160, 150:160] <- rbinom(11 ** 2, 1, 0.6)
+# 3 consecutive
+d[170:173, 37:40] <- rpois(4 * 4, lambda = 20)
+d[177:180, 37:40] <- rpois(4 * 4, lambda = 20)
+true_clusters[170:180] <- 13
 
-cor[165:175, 165:175] <- rbinom(11 ** 2, 1, 0.5)
+# 3 consecutive bigger_cluster
+d[185:190, 29:32] <- rpois(6 * 4, lambda = 20)
+d[194:199, 29:32] <- rpois(6 * 4, lambda = 20)
+true_clusters[185:199] <- 14
 
-cor[180:190, 180:190] <- rbinom(11 ** 2, 1, 0.4)
+# 3 spread
+d[205:215, 41:44] <- rpois(11 * 4, lambda = 20)
+d[c(208, 210, 212), 41:50] <- rpois(3 * 10, lambda = 5)
+true_clusters[205:215] <- 15
 
-cor[195:200, 195:200] <- rbinom(6 ** 2, 1, 0.2)
-cor[lower.tri(cor)] <- t(cor)[lower.tri(cor)]
-diag(cor) <- 1
+d <- d / colSums(d)
 
-plotit(cor)
-
-#data(sclero)
-
-#cor <- abs(cor(t(sclero)))
-#cor <- 1 * (cor > 0.7)
-
-cor_tom <- TOMsimilarity(cor)
-plotit(cor_tom)
-#cor <- cor_tom
-cor[1:10, 1:10]
+cor <- abs(cor(t(d), method = "pearson"))
+heatmap(d, Rowv = NA, Colv = NA, scale = "none")
+heatmap(cor, Rowv = NA, Colv = NA, symm = TRUE, scale = "none")
+heatmap(1 * (cor >= 0.5), Rowv = NA, Colv = NA, symm = TRUE, scale = "none")
+true_clusters <- true_clusters + 1
 ```
-
-
 
 So how does the thresholded pipeline do?
 
 ```{r}
-threshold_clustering(cor, max_cluster = 50)$clusters
+thresh_clust <- threshold_clustering(cor, threshold = 0.5, max_cluster = 50, edge_fill_rate = 0.6)$clusters
+thresh_clust_pb <- numeric(nrow(cor))
+
+for (i in seq_len(nrow(thresh_clust))) {
+  thresh_clust_pb[thresh_clust[i, "start"]:thresh_clust[i, "end"]] <- i
+}
+thresh_clust_pb <- thresh_clust_pb + 1
+thresh_clust
 ```
 
 Pretty good actually.
@@ -100,12 +130,49 @@ Most of these examples are pretty easy, but they're the clear cases that any met
 
 What if we use the WGCNA method for cleaning clusters instead?
 
+
 ```{r}
-#threshold_clustering(cor, max_cluster = 50, smooth = "TOM")$clusters
+powers = c(c(1:10), seq(from = 12, to = 40, by=2))
+sft = pickSoftThreshold(t(d), powerVector = powers, verbose = 5)
+
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2))
+cex1 = 0.9
+
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
 ```
 
-It fails to merge the "mid overlap" cluster (it's debatable about whether this should be merged), but does better with the gappy cluster.
-I think probably this is the more reliable method.
+Based on this 18 would be the right power, but i've looked at it and actually 1 is more like what I want.
+
+```{r}
+cor_adj <- adjacency(t(d), power = 3)
+plotit(cor_adj)
+```
+
+
+```{r}
+thresh_clust_tom <- threshold_clustering(cor_adj, threshold = 0.5, edge_fill_rate = 0.6, max_cluster = 50, smooth = "TOM")$clusters
+thresh_clust_tom_pb <- numeric(nrow(cor))
+
+for (i in seq_len(nrow(thresh_clust_tom))) {
+  thresh_clust_tom_pb[thresh_clust_tom[i, "start"]:thresh_clust_tom[i, "end"]] <- i
+}
+thresh_clust_tom_pb <- thresh_clust_tom_pb + 1
+thresh_clust_tom
+```
+
 
 
 So what else can we do?
@@ -118,7 +185,6 @@ logsumexp <- function (x) {
 }
 
 softmax <- function (x) {
-  x <- x + min(x)
   exp(x - logsumexp(x))
 }
 
@@ -173,47 +239,32 @@ gen_pm_features <- function(mat, context = 3, dist_penalty = unity) {
   return(out)
 }
 
-heatmap(gen_pm_features(cor, context = 4), Rowv = NA, Colv = NA)
+#heatmap(gen_pm_features(cor, context = 4), Rowv = NA, Colv = NA)
 
-gen_pm_features(cor, context = 10, dist_penalty = function(xi, xj) {rbf(xi, xj, std = 2, power = 4)})
+#gen_pm_features(cor, context = 10, dist_penalty = function(xi, xj) {rbf(xi, xj, std = 2, power = 4)})
 ```
 
-$transProbs
-               to
-from             nocluster cluster_start    cluster cluster_end
-  nocluster     0.70503419    0.22859469 0.03284794  0.03352318
-  cluster_start 0.03613480    0.64380925 0.21054008  0.10951588
-  cluster       0.03959185    0.04893161 0.67604962  0.23542692
-  cluster_end   0.24633205    0.06610597 0.04377526  0.64378672
 
 ```{r}
 transition_table <- matrix(0, nrow = 4, ncol = 4)
 rownames(transition_table) <- colnames(transition_table) <- states <- c("nocluster", "cluster_start", "cluster", "cluster_end")
 
-transition_table["cluster_end", "nocluster"] <- 0.25
-transition_table["nocluster", "nocluster"] <- 0.75
+transition_table["cluster_end", "nocluster"] <- 0.2
+transition_table["nocluster", "nocluster"] <- 0.8
 
 transition_table["cluster_start", "cluster"] <- 0.1
 transition_table["cluster", "cluster"] <- 0.9
 
-transition_table["cluster_start", "cluster_end"] <- 0.1
-transition_table["cluster", "cluster_end"] <- 0.9
+transition_table["cluster_start", "cluster_end"] <- 0.0
+transition_table["cluster", "cluster_end"] <- 1.0
 
-transition_table["cluster_end", "cluster_start"] <- 0.5
-transition_table["nocluster", "cluster_start"] <- 0.5
+transition_table["cluster_end", "cluster_start"] <- 0.1
+transition_table["nocluster", "cluster_start"] <- 0.9
 
-
-heatmap(transition_table, Rowv = NA, Colv = NA)
+#heatmap(transition_table, Rowv = NA, Colv = NA, scale = "none")
+transition_table <- log(transition_table)
 ```
 
-
-$emissionProbs
-               symbols
-states                 rev        fwd       both    neither
-  nocluster     0.04412888 0.04413120 0.03156040 0.88017952
-  cluster_start 0.05257447 0.85767542 0.04419816 0.04555196
-  cluster       0.08585462 0.08588891 0.78916555 0.03909092
-  cluster_end   0.85825106 0.05263497 0.04423603 0.04487795
 
 ```{r}
 start_table = matrix(0, nrow = 1, ncol = 4)
@@ -223,32 +274,22 @@ start_table[1, ] <- c(0.99, 0.01, 0.0, 0.0)
 emission_table <- matrix(0, nrow = 4, ncol = 4)
 rownames(emission_table) <- c("nocluster", "cluster_start", "cluster", "cluster_end")
 colnames(emission_table) <- symbols <- c("rev", "fwd", "both", "neither")
-emission_table["cluster_start",] <- c(0.25, 0.45, 0.25, 0.05)
-emission_table["cluster",] <- c(0.1, 0.1, 0.75, 0.05)
-emission_table["cluster_end",] <- c(0.45, 0.25, 0.25, 0.05)
-emission_table["nocluster",] <- c(0.05, 0.05, 0.05, 0.85)
-heatmap(emission_table, Rowv = NA, Colv = NA)
+emission_table["cluster_start",] <- c(0.225, 0.5, 0.225, 0.05)
+emission_table["cluster",] <- c(0.166667, 0.166667, 0.5, 0.166667)
+emission_table["cluster_end",] <- c(0.5, 0.225, 0.225, 0.05)
+emission_table["nocluster",] <- c(0.1, 0.1, 0.1, 0.7)
+#heatmap(emission_table, Rowv = NA, Colv = NA)
+
+start_table <- log(start_table)
+emission_table <- log(emission_table)
 ```
 
+
 ```{r}
-obs_pm <- gen_pm_features(cor, context = 6)
+obs_pm <- gen_pm_features(cor, context = 4)
 obs <- colnames(obs_pm)[apply(obs_pm, MARGIN = 1, FUN = which.max)]
 ```
 
-
-```{r}
-heatmap(obs_pm, Rowv = NA, Colv = NA)
-```
-
-```{r}
-emission_table
-```
-
-```{r}
-heatmap(t(obs_pm[1:10,]), Rowv = NA, Colv = NA, scale = "none")
-heatmap(emissions[, 1:10], Rowv = NA, Colv = NA, scale = "none")
-heatmap(emission_table[, obs[1:10]], Rowv = NA, Colv = NA, scale = "none")
-```
 
 ```{r}
 trellis <- matrix(0, nrow = length(states), ncol = length(obs))
@@ -256,13 +297,6 @@ rownames(trellis) <- states
 
 pointers <- matrix(0, nrow = length(states), ncol = length(obs))
 rownames(pointers) <- states
-```
-
-```{r}
-# initial state
-emission_table <- log(emission_table)
-transition_table <- log(transition_table)
-start_table <- log(start_table)
 ```
 
 
@@ -318,7 +352,7 @@ for (i in rev(seq_len(ncol(trellis)))) {
 
 
 ```{r}
-min_cluster <- 5
+min_cluster <- 4
 ranges <- list()
 
 h <- 1
@@ -345,48 +379,384 @@ for (i in seq_along(best_path)) {
   }
 }
 
-ranges <- do.call(rbind, ranges)
+state_machine_hmm_ranges <- do.call(rbind, ranges)
+state_machine_hmm_ranges
+
+
+state_machine_hmm_pb <- numeric(nrow(cor))
+
+for (i in seq_len(nrow(state_machine_hmm_ranges))) {
+  state_machine_hmm_pb[state_machine_hmm_ranges[i, 1]:state_machine_hmm_ranges[i, 2]] <- i
+}
+
+state_machine_hmm_pb <- state_machine_hmm_pb + 1
 ```
 
 
-cor[5:15, 5:15] <- 1 # Clean separation
-cor[20:25, 20:25] <- 1 # Non-overlapping but adjacent
-cor[26:31, 26:31] <- 1
-cor[36:41, 36:41] <- 1 # Small overlap
-cor[41:46, 41:46] <- 1
-cor[50:60, 50:60] <- 1 # Mid overlap
-cor[55:65, 55:65] <- 1
-cor[70:80, 70:80] <- 1 # Large overlap
-cor[72:82, 72:82] <- 1
-cor[85:95, 85:95] <- 1 # Small overlap big clusters
-cor[95:105, 95:105]
-cor[107:117, 107:117]
-cor[120:130, 120:130]
-cor[135:145, 135:145]
-cor[150:160, 150:160]
-cor[165:175, 165:175]
-cor[180:190, 180:190]
-cor[195:200, 195:200]
-
+Heres the function for calculating the directionality index.
+I found that it didn't really work to construct states for the HMM, but might be ok for a traditional segmentation algorithm.
 
 ```{r}
-ranges
+directionality_index <- function(mat, context = 10, eps = .Machine$double.eps) {
+  out <- numeric(nrow(mat)) # matrix(NA, nrow = nrow(mat), ncol = 3)
+  
+  for (i in seq_len(nrow(mat))) {
+    fwd_ <- numeric(context)
+    rev_ <- numeric(context)
+    
+    for (j in seq_len(context)) {
+      if ((i + j) >  nrow(mat)) {
+        f <- 0
+      } else {
+        f <- mat[i, (i + j)]
+      }
+      
+      fwd_[j] <- f
+      
+      if ((i - j) <= 0) {
+        r <- 0
+      } else {
+        r <- mat[i, (i - j)]
+      }
+      
+      rev_[j] <- r
+    }
+    
+    r <- rev_
+    f <- fwd_
+    
+    rev_ = sum(rev_)
+    fwd_ = sum(fwd_)
+    expected <- (fwd_ + rev_) / 2
+    
+    if (rev_ == fwd_) {
+      one <- 0
+    } else {
+      one <- (rev_ - fwd_) / abs(rev_ - fwd_)
+    }
+    two <- (
+      (((fwd_ - expected) ** 2) / expected) +
+      (((rev_ - expected) ** 2) / expected)
+    )
+
+    DI <- one * two
+    
+    if (is.na(DI)) {
+      print(f)
+      print(r)
+      print(rev_)
+      print(fwd_)
+      print(expected)
+      print(one)
+      print(two)
+      print("")
+      
+    }
+    
+    out[i] <- DI
+  }
+  return(out)
+}
+
+
+plot(directionality_index(cor, context = 50))
+di <- directionality_index(cor, context = 50)
 ```
 
-5	15	0.9090909	0	1.0000000	11	0
-20	25	0.8333333	0	1.0000000	6	0
-26	31	0.8333333	0	1.0000000	6	0
-36	41	0.8333333	0	1.0000000	6	0
-41	46	0.8333333	0	1.0000000	6	0
-50	65	0.8750000	0	0.9916667	16	0
-70	82	0.9230769	0	1.0000000	13	0
-85	95	0.9090909	0	1.0000000	11	0
-95	105	0.9090909	0	1.0000000	11	0
-107	117	0.8181818	1	0.9090909	11	0
-140	145	0.8333333	0	1.0000000	6	0
+
+Constrained hierarchical clustering
 
 
 ```{r}
+cor_dis <- 1 - cor
+ac <- adjClust(cor_dis, type="dissimilarity")
+plot(ac)
+```
+
+
+```{r}
+library(cluster)
+
+
+k_range <- 10:50
+sl_scores <- numeric(length(k_range))
+sl_ks <- list()
+for (k in k_range) {
+  adjclust_pb_init <- unname(cutree_chac(ac, h = 1.0, k = k)) + 1
+  sl <- silhouette(adjclust_pb_init, dmatrix = cor_dis)
+  mask <- which(vapply(split(sl[, "sil_width"], sl[, "cluster"]), FUN = mean, FUN.VALUE = 0.0) < 0)
+
+  adjclust_pb_init[adjclust_pb_init %in% mask] <- 1
+  sl <- silhouette(adjclust_pb_init, dmatrix = cor_dis)
+  sl_mean <- mean(sl[, "sil_width"], na.rm = TRUE)
+  sl_scores[k] <- sl_mean
+  sl_ks[[k]] <- sl
+}
+
+print(which.max(sl_scores))
+plot(sl_scores)
+plot(sl_ks[[which.max(sl_scores)]])
+```
+
+```{r}
+k <- 40 #which.max(sl_scores)
+plot(sl_ks[[k]])
+
+adjclust_pb_init <- unname(cutree_chac(ac, h = 1.0, k = k)) + 1
+cluster_means <- numeric(length(unique(adjclust_pb_init)))
+for (i in unique(adjclust_pb_init)) {
+  mask <- adjclust_pb_init == i
+  sub_mat <- ac$data[mask, mask]
+  m <- mean(sub_mat[upper.tri(sub_mat)], na.rm = TRUE)
+  cluster_means[i] <- m
+}
+
+hist(cluster_means, breaks = 50)
+```
+
+
+```{r}
+cutoff <- 0.8
+sl <- sl_ks[[which.max(sl_scores)]]
+mask <- unname(which(vapply(split(sl[, "sil_width"], sl[, "cluster"]), FUN = mean, FUN.VALUE = 0.0) < 0))
+
+cluster_map <- numeric(length(unique(adjclust_pb_init)))
+
+h <- 2
+for (i in seq_along(cluster_means)) {
+  if (is.na(cluster_means[i])) {
+    cluster_map[i] <- i
+    next
+  }
+  if (cluster_means[i] < cutoff) {
+    cluster_map[i] <- 1
+  } else {
+    cluster_map[i] <- h
+    h <- h + 1
+  }
+}
+
+adjclust_pb <- cluster_map[adjclust_pb_init]
+
+sl <- silhouette(adjclust_pb, dmatrix = cor_dis)
+cbind(true_clusters, adjclust_pb)
+```
+
+
+```{r}
+adjacency <- adjacency(t(d), power = 18)
+TOM <- TOMsimilarity(adjacency)
+dissTOM <- 1 - TOM
+heatmap(adjacency, Rowv = NA, Colv = NA)
+heatmap(TOM, Rowv = NA, Colv = NA)
+```
+
+```{r}
+geneTree <- hclust(as.dist(dissTOM), method = "average")
+plot(geneTree)
+```
+
+```{r}
+minModuleSize <- 4
+dynamicMods <- cutreeDynamic(
+  dendro = geneTree,
+  distM = dissTOM,
+  deepSplit = 4,
+  pamRespectsDendro = FALSE,
+  minClusterSize = minModuleSize
+)
+
+table(dynamicMods)
+```
+
+```{r}
+wgcna_clusters <- unname(dynamicMods)
+wgcna_clusters <- wgcna_clusters + (1 - min(wgcna_clusters))
+cluster_means <- numeric(length(unique(wgcna_clusters)))
+for (i in unique(wgcna_clusters)) {
+  mask <- wgcna_clusters == i
+  sub_mat <- ac$data[mask, mask]
+  m <- mean(sub_mat[upper.tri(sub_mat)], na.rm = TRUE)
+  cluster_means[i] <- m
+}
+
+hist(cluster_means, breaks = 50)
+```
+
+
+```{r}
+# orders the cluster numbers sequentially
+fix_cluster_order <- function(path) {
+  h <- 2
+  name_map <- numeric(length(unique(path)))
+  name_map[1] <- 1
+  for (i in seq_along(path)) {
+    val <- path[i]
+    if (is.na(name_map[val]) || (name_map[val] == 0)) {
+      name_map[val] <- h
+      h <- h + 1
+    }
+  }
+  
+  return(name_map[unname(path)])
+}
+```
+
+
+```{r}
+threshold <- 0.8
+cluster_map <- numeric(length(unique(wgcna_clusters)))
+
+h <- 2
+for (i in seq_along(cluster_means)) {
+  if (is.na(cluster_means[i])) {
+    cluster_map[i] <- 1
+    next
+  }
+  if (cluster_means[i] < threshold) {
+    cluster_map[i] <- 1
+  } else {
+    cluster_map[i] <- h
+    h <- h + 1
+  }
+}
+
+wgcna_clusters_pb <- fix_cluster_order(cluster_map[wgcna_clusters])
+wgcna_clusters_pb
+```
+
+```{r}
+MElist <- moduleEigengenes(t(d), colors = wgcna_clusters_pb)
+MEs <- MElist$eigengenes
+MEDiss <- 1 - cor(MEs)
+heatmap(MEDiss, Rowv = NA, Colv = NA, symm = TRUE, scale = "none")
+```
+
+
+```{r}
+MEs <- as.matrix(MEs)
+MEdists <- t(MEs) %*% MEs
+MEsmdists <- t(apply(MEdists, MARGIN = 1, FUN = softmax))
+heatmap(MEsmdists, Rowv = NA, Colv = NA, symm = TRUE, scale = "none")
+```
+
+```{r}
+TOM2 <- TOM
+TOM2[lower.tri(TOM2)] <- NA
+
+dynamic_mods <- unname(wgcna_clusters_pb)
+nclusters <- max(dynamic_mods)
+emission_matrix <- matrix(0, nrow = nclusters, ncol = nclusters)
+
+for (cluster in seq_len(nclusters)) {
+  mask <- dynamic_mods == cluster
+  
+  sum_total_weights <- sum(TOM2[mask, ], na.rm = TRUE) + 1
+  
+  for (cluster2 in seq_len(nclusters)) {
+    mask2 <- dynamic_mods == cluster2
+    sum_weights <- sum(TOM2[mask, mask2], na.rm = TRUE) + 1
+    emission_matrix[cluster, cluster2] <- sum_weights / sum_total_weights
+  }
+}
+
+emission_matrix <- apply(log(emission_matrix), MARGIN = 2, FUN = softmax)
+
+heatmap(emission_matrix, Rowv = NA, Colv = NA, symm = TRUE, scale = "none")
+```
+
+
+```{r}
+m <- matrix(0, ncol = ncol(TOM2), nrow = max(wgcna_clusters_pb))
+
+m[matrix(c(wgcna_clusters_pb, seq_len(ncol(TOM2))), ncol = 2, nrow = ncol(TOM2))] <- 1
+heatmap(m, Colv = NA)
+```
+
+```{r}
+start_probabilities <- table(wgcna_clusters_pb) / length(wgcna_clusters_pb)
+start_probabilities
+```
+
+
+
+```{r}
+states <- unname(wgcna_clusters_pb)
+wgcna_clusters_pb <- fix_cluster_order(states)
+states
+```
+
+
+```{r}
+library(HMM)
+
+transition_matrix2 <- matrix(1, nrow = nrow(emission_matrix), ncol = ncol(emission_matrix))
+diag_weight <- 5
+null_weight <- 1
+switch_weight <- 0.5
+
+transition_matrix2[1, ] <- null_weight
+transition_matrix2[, 1] <- null_weight
+diag(transition_matrix2) <- diag_weight
+transition_matrix2 <- apply(transition_matrix2, MARGIN = 1, FUN = softmax)
+
+hmm <- initHMM(
+  States = seq_along(unique(states)),
+  Symbols = seq_along(unique(states)),
+  startProbs = unname(start_probabilities),
+  transProbs = transition_matrix2,
+  emissionProbs = emission_matrix
+)
+wgcna_clusters_smoothed_pb <- fix_cluster_order(viterbi(hmm, states))
+
+results <- cbind(true_clusters, thresh_clust_pb, thresh_clust_tom_pb, state_machine_hmm_pb, wgcna_clusters_pb, wgcna_clusters_smoothed_pb, adjclust_pb)
+results
+```
+
+```{r}
+results2 <- results
+results2[results2 == 1] <- NA
+heatmap(t(results2), Rowv = NA, Colv = NA, scale = "none")
+```
+
+
+```{r}
+find_ranges_from_pb <- function(path, excl_cluster = 1, min_cluster = 4) {
+  ranges <- list()
+  
+  h <- 1
+  last_start <- NULL
+  last_state <- NULL
+  for (i in seq_along(path)) {
+    state <- path[i]
+    if (i == 1) {
+      last_start <- i
+      last_state <- state
+    }
+    
+    if (state != last_state) {
+      end <- i
+      cluster_length <- end - last_start
+      if ((cluster_length >= min_cluster) && (last_state != 1)) {
+        ranges[[h]] <- c("start" = last_start, "end" = i - 1)
+        h <- h + 1
+      }
+      
+      last_start <- i
+      last_state <- state
+      
+    }
+  }
+  
+  ranges <- do.call(rbind, ranges)
+  ranges
+}
+```
+
+
+```{r}
+ranges <- find_ranges_from_pb(adjclust_pb)
+
 for (i in seq_len(nrow(ranges))) {
   context <- 5
   start <- max(c(ranges[i, "start"] - context, 1))
@@ -396,86 +766,55 @@ for (i in seq_len(nrow(ranges))) {
 }
 ```
 
-```{r}
-library(HMM)
-tr <- exp(transition_table)
-#rownames(tr) <- colnames(tr) <- NULL
-em <- exp(emission_table)
-#rownames(em) <- colnames(em) <- NULL
-start <- exp(start_table[1, ])
-#names(start) <- NA
 
-hmm <- initHMM(states, symbols, start, transProbs = tr, emissionProbs = em)
-hmm_bw <- baumWelch(hmm, obs, pseudoCount = 1)$hmm
+```{r, fig.width=8, fig.height=10}
+library(circlize)
+r <- results
+colnames(r) <- c('clusters', 'threshold', 'threshold_tom', 'state_machine', 'wgcna', 'wgcna_smoothed', 'adjclust')
+r[r == 1] <- NA
+#r <- as.data.frame(t(apply(r, MARGIN = 1, FUN = as.factor)))
+r <- as.data.frame(r)
+pal <- rainbow(max(r, na.rm = TRUE))
+names(pal) <- seq_along(pal)
+colours <- lapply(colnames(r), FUN=function(x) {pal})
+names(colours) <- colnames(r)
+#names(colours) <- 1:length(colours)
+
+ha <- columnAnnotation(
+  df = r,
+  name = "clusters",
+  col = colours,
+  show_legend = FALSE,
+  na_col = "#E0DFDE",
+  annotation_name_side = "left"
+)
+
+colours2 <- colorRamp2(
+  seq(-1, 1, length.out = 29),
+  rev(paletteer::paletteer_c("ggthemes::Red-Blue-White Diverging", 29))
+)
+cor2 <- cor
+cor2[upper.tri(cor)] <- NA
+
+h <- Heatmap(
+  cor2,
+  col = rev(paletteer::paletteer_c("ggthemes::Red-Blue-White Diverging", 30)),
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  show_heatmap_legend = FALSE,
+  bottom_annotation = ha,
+  width = unit(6, "in"),
+  height = unit(6, "in"),
+  na_col = "white",
+  row_names_side = "left"
+)
+
+png("synthetic_clusters.png", width = 8, height = 10, units = "in", res = 450)
+print(h)
+dev.off()
+
+print(h)
 ```
 
 
-```{r}
-best_path <- viterbi(hmm, observation = obs)
 
-min_cluster <- 5
-ranges <- list()
-
-h <- 1
-last_start <- NULL
-for (i in seq_along(best_path)) {
-  state <- best_path[i]
-  if (state == "cluster_start") {
-    if (!is.null(last_start)) {
-      stop("this shouldn't happen")
-    }
-    last_start <- i
-  } else if (state == "cluster_end") {
-    if (is.null(last_start)) {
-      stop("this shouldn't happen")
-    }
-    
-    if ((abs(last_start - i) + 1) >= min_cluster) {
-      ranges[[h]] <- c("start" = last_start, "end" = i)
-      h <- h + 1
-    }
-    last_start <- NULL
-  } else if (!state %in% c("cluster", "nocluster")) {
-    stop("This shouldn't happen")
-  }
-}
-
-ranges <- do.call(rbind, ranges)
-ranges
-```
-
-
-
-```{r}
-best_path <- viterbi(hmm_bw, observation = obs)
-
-min_cluster <- 5
-ranges <- list()
-
-h <- 1
-last_start <- NULL
-for (i in seq_along(best_path)) {
-  state <- best_path[i]
-  if (state == "cluster_start") {
-    if (!is.null(last_start)) {
-      stop("this shouldn't happen")
-    }
-    last_start <- i
-  } else if (state == "cluster_end") {
-    if (is.null(last_start)) {
-      stop("this shouldn't happen")
-    }
-    
-    if ((abs(last_start - i) + 1) >= min_cluster) {
-      ranges[[h]] <- c("start" = last_start, "end" = i)
-      h <- h + 1
-    }
-    last_start <- NULL
-  } else if (!state %in% c("cluster", "nocluster")) {
-    stop("This shouldn't happen")
-  }
-}
-
-ranges <- do.call(rbind, ranges)
-ranges
-```
